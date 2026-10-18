@@ -1,5 +1,5 @@
 // Guarda la app en el teléfono para que abra sin conexión. Cambiar VERSION al publicar una versión nueva.
-const VERSION = 'mis-cuentas-1.5.3';
+const VERSION = 'mis-cuentas-1.5.4';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
