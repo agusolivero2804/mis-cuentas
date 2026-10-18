@@ -85,6 +85,8 @@
 
   .calc { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .calc .tot b { font-size: 18px; }
+  .calc .tot.zero { background: var(--field); border-color: var(--border); }
+  .calc .tot.zero small, .calc .tot.zero b { color: var(--muted); }
 
   .btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px; border-radius: 10px; border: 1px solid var(--border);
     background: var(--card); cursor: pointer; font-weight: 500; transition: background .15s, border-color .15s; }
@@ -238,8 +240,9 @@
         <div><label for="fDate">Fecha</label><input type="date" id="fDate" required></div>
         <div><label for="fAmount" id="fAmountLabel">Monto</label><input type="number" id="fAmount" step="0.01" min="0.01" inputmode="decimal" required placeholder="0"></div>
         <div class="full calc" id="calc" hidden>
-          <div class="tot"><small>Precio del tratamiento (× 1,33)</small><b id="cPrice">$0</b></div>
-          <div class="tot net"><small>Beneficio</small><b id="cProfit">$0</b></div>
+          <div class="full"><label for="fPrice">Precio cobrado</label><input type="number" id="fPrice" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
+          <div class="tot net" id="cResultBox"><small id="cResultLbl">Beneficio</small><b id="cResult">$0</b></div>
+          <div class="tot net" id="cPctBox"><small id="cPctLbl">Ganancia</small><b id="cPct">0%</b></div>
         </div>
         <div class="full"><label for="fDesc">Detalle (opcional)</label><input id="fDesc"></div>
         <div class="full row">
@@ -292,7 +295,6 @@
   var editingId = null;
   var period = currentMonth();
   var kind = 'consulta';
-  var MARKUP = 1.33;
   var KINDS = {
     consulta: { label: 'Monto de la consulta', ph: 'Ej: nombre del paciente' },
     tratamiento: { label: 'Costo de los insumos', ph: 'Ej: paciente o tipo de tratamiento' },
@@ -336,7 +338,14 @@
 
   function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function round2(n) { return Math.round(n * 100) / 100; }
-  function priceFor(cost) { return round2(cost * MARKUP); }
+  // Resultado de un tratamiento: diferencia entre lo cobrado y los insumos, y su porcentaje sobre el costo.
+  function treatResult(cost, price) {
+    var diff = round2(price - cost);
+    return { diff: diff, pct: cost > 0 ? diff / cost * 100 : 0 };
+  }
+  function pctText(p) {
+    return (p > 0 ? '+' : p < 0 ? '−' : '') + Math.abs(p).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + '%';
+  }
 
   function setKind(k) {
     kind = k;
@@ -344,17 +353,27 @@
     $('fAmountLabel').textContent = KINDS[k].label;
     $('fDesc').placeholder = KINDS[k].ph;
     $('calc').hidden = k !== 'tratamiento';
+    $('fPrice').required = k === 'tratamiento';
     updateCalc();
   }
   function updateCalc() {
-    var cost = round2(parseFloat($('fAmount').value) || 0), price = priceFor(cost);
-    $('cPrice').textContent = fmt(price);
-    $('cProfit').textContent = fmt(price - cost);
+    var cost = round2(parseFloat($('fAmount').value) || 0), price = round2(parseFloat($('fPrice').value) || 0);
+    var r = treatResult(cost, price), empty = !cost || $('fPrice').value === '';
+    var loss = r.diff < 0;
+    $('cResultLbl').textContent = loss ? 'Pérdida' : 'Beneficio';
+    $('cPctLbl').textContent = loss ? 'Se pierde' : 'Se gana';
+    $('cResult').textContent = fmt(Math.abs(r.diff));
+    $('cPct').textContent = empty ? '-' : pctText(r.pct);
+    ['cResultBox', 'cPctBox'].forEach(function (id) {
+      $(id).classList.toggle('neg', loss && !empty);
+      $(id).classList.toggle('zero', empty);
+    });
   }
   document.querySelectorAll('.seg button').forEach(function (b) {
     b.addEventListener('click', function () { setKind(b.dataset.kind); });
   });
   $('fAmount').addEventListener('input', updateCalc);
+  $('fPrice').addEventListener('input', updateCalc);
 
   // Qué formulario corresponde a un movimiento guardado (incluye los cargados antes de esta versión).
   function kindOf(it) {
@@ -384,7 +403,7 @@
     if (kind === 'tratamiento') {
       var g = newId();
       items = [
-        { id: g + 'p', group: g, type: 'in', cat: 'Tratamiento', date: date, amount: priceFor(amount), desc: desc },
+        { id: g + 'p', group: g, type: 'in', cat: 'Tratamiento', date: date, amount: round2(parseFloat($('fPrice').value) || 0), desc: desc },
         { id: g + 'c', group: g, type: 'out', cat: 'Insumos', date: date, amount: amount, desc: desc }
       ];
     } else {
@@ -413,7 +432,9 @@
     } else {
       editingId = id; setKind(kindOf(it));
       var cost = group.find(function (x) { return x.type === 'out'; });
+      var income = group.find(function (x) { return x.type === 'in'; });
       $('fDate').value = it.date; $('fAmount').value = kind === 'tratamiento' && cost ? cost.amount : it.amount; $('fDesc').value = it.desc;
+      $('fPrice').value = kind === 'tratamiento' && income ? income.amount : '';
       updateCalc();
       $('formTitle').textContent = 'Editar registro'; $('saveLbl').textContent = 'Guardar cambios'; $('cancelEdit').hidden = false;
       $('form').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -599,7 +620,10 @@
       var sub = [];
       if (x.group) {
         var c = items.find(function (y) { return y.group === x.group && y.type === 'out'; });
-        if (c) sub.push('Insumos ' + fmt(c.amount), 'Beneficio ' + fmt(x.amount - c.amount));
+        if (c) {
+          var r = treatResult(c.amount, x.amount);
+          sub.push('Insumos ' + fmt(c.amount), (r.diff < 0 ? 'Pérdida ' : 'Beneficio ') + fmt(Math.abs(r.diff)) + ' (' + pctText(r.pct) + ')');
+        }
       }
       sub = sub.filter(Boolean).join(' · ');
       return '<tr><td class="date">' + shortDate(x.date) + '</td><td>' + (esc(x.desc) || esc(x.cat) || '<span class="muted">Sin detalle</span>') +
