@@ -127,6 +127,14 @@
   .up { color: var(--green); } .down { color: var(--red); }
   .kpis .tot b { font-size: 18px; }
 
+  .install { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 16px; border-radius: 14px;
+    background: var(--accent-soft); border: 1px solid var(--accent-2); }
+  .install .logo { width: 36px; height: 36px; border-radius: 10px; box-shadow: none; }
+  .install .logo svg.i { width: 20px; height: 20px; }
+  .install p { margin: 0; flex: 1; font-size: 13.5px; }
+  .install b { display: block; font-size: 14.5px; }
+  .install .x { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px; font-size: 18px; line-height: 1; }
+
   @media (max-width: 560px) {
     main { padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
     input, select { font-size: 16px; } /* evita que el iPhone haga zoom al tocar un campo */
@@ -157,6 +165,13 @@
       <button type="button" data-view="viewCharts"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="5" rx="1"/><rect x="12" y="8" width="3" height="9" rx="1"/><rect x="17" y="5" width="3" height="12" rx="1"/></svg>Gráficos</button>
     </div>
   </header>
+
+  <div class="install" id="install" hidden>
+    <div class="logo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="M16.5 6.5H10a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H7"/></svg></div>
+    <p><b>Instalá Mis Cuentas en tu celular</b><span id="installMsg"></span></p>
+    <button class="btn primary" id="installBtn" hidden>Instalar</button>
+    <button class="x" id="installClose" aria-label="Cerrar">✕</button>
+  </div>
 
   <div id="viewCharts" hidden>
     <div class="card">
@@ -659,6 +674,44 @@
     });
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
+    setupInstall();
+  }
+
+  // Aviso para instalar la app en el celular. No aparece si ya está instalada o si se cerró el aviso.
+  function setupInstall() {
+    var installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    var closed = false;
+    try { closed = localStorage.getItem('mis-cuentas-install-closed') === '1'; } catch (e) {}
+    if (installed || closed) return;
+    var ua = navigator.userAgent;
+    var ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var show = function (msg) { $('installMsg').textContent = msg; $('install').hidden = false; };
+    $('installClose').addEventListener('click', function () {
+      $('install').hidden = true;
+      try { localStorage.setItem('mis-cuentas-install-closed', '1'); } catch (e) {}
+    });
+    if (ios) {
+      if (/CriOS|FxiOS|EdgiOS/.test(ua)) show('Abrí este link en Safari para poder instalarla.');
+      else show('Tocá Compartir (el cuadrado con la flecha) y elegí "Agregar a pantalla de inicio".');
+      return;
+    }
+    // Android / Chrome: el navegador avisa cuando se puede instalar y el botón abre su ventana de instalación.
+    var deferred = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault(); deferred = e;
+      $('installBtn').hidden = false;
+      show('Queda con su ícono y funciona sin internet.');
+    });
+    $('installBtn').addEventListener('click', function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function () { deferred = null; $('install').hidden = true; });
+    });
+    window.addEventListener('appinstalled', function () { $('install').hidden = true; });
+    // Si el navegador no ofrece la instalación directa, igual se explica cómo hacerlo desde el menú.
+    if (/Android/.test(ua)) setTimeout(function () {
+      if (!deferred) show('Tocá los tres puntitos del navegador y elegí "Instalar app" o "Agregar a pantalla principal".');
+    }, 2500);
   }
 
   resetForm();
